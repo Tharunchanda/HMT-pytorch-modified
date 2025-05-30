@@ -1,79 +1,93 @@
-# HMT: Hierarchical Memory Transformer
-
-![hmt](/img/hmt_flow_v2.png)
-
-Hierarchical Memory Transformer (HMT) is a novel framework that enables and improves models' long-context processing ability by imitating human memorization behavior. Leveraging memory-augmented segment-level recurrence, we organize the memory hierarchy by preserving tokens from early input tokens segments, passing memory embeddings along the sequence, and recalling relevant information from history.
-
-## Features
-
-- **Easy to use**: If you pretrained a new LLM and want to augment with HMT, simply push the model checkpoints to huggingface and use the `--model_name` argument to pull your model. 
-- **Command line centric**: To play with different configurations of HMT during training, simply modify the argument in the command line. There is no need to modify the source code.
-- **Memory efficient**: With small and fixed segment lengths for inputs, HMT can still achieve comparable or better effectiveness than models inferencing with longer context, which consumes more GPU VRAM.
-- **Long context with topic switching**: HMT is equipped with a memory recall mechanism, which can handle multiple topics in a single long document to filter distractive information.
-
-# HMT-pytorch: Hierarchical Memory Transformer for Long-Context Language Modeling
+# HMT-pytorch: Hierarchical Memory Transformer with Advanced Memory Management
 
 ## Overview
 
-**HMT-pytorch** implements a Hierarchical Memory Transformer (HMT) in PyTorch, designed for efficient long-context language modeling and question answering. The project builds on HuggingFace Transformers and integrates advanced memory management, LoRA fine-tuning, and flexible dataset handling for research and practical applications.
+**HMT-pytorch** is a PyTorch implementation of the Hierarchical Memory Transformer (HMT), designed for efficient long-context language modeling. The core innovation of this project is its **attention-based memory management**, enabling the model to reason over long sequences by dynamically retaining the most relevant context.
 
 ---
 
-## Features
+## Key Feature: Memory Management Improvements
 
-- **Hierarchical Memory Transformer (HMT):**
-  - Segment-wise processing for long documents.
-  - Memory recall mechanism with cross-attention.
-  - Attention-based memory management (`MemoryAttentionManager`) for adaptive memory retention.
+### Attention-Based Memory Recall
 
-- **Efficient Training:**
-  - LoRA (Low-Rank Adaptation) for parameter-efficient fine-tuning.
-  - Mixed precision training (`--fp16`) for reduced memory usage.
-  - Gradient accumulation and learning rate scheduling.
+Traditional memory management in long-context models often uses FIFO (First-In-First-Out) strategies, which can discard important information simply because it is old. **HMT-pytorch replaces FIFO with an attention-based memory manager** that adaptively selects which memory slots to retain or discard based on their relevance to the current context.
 
-- **Flexible Dataset Support:**
-  - Out-of-the-box support for Wikitext-2, Wikitext-103, PubMedQA, OpenROAD QA, and custom datasets.
-  - Streaming and cache directory options for large-scale datasets.
-  - Data augmentation: interleaving, dilation, and dynamic reading speed.
+#### How It Works
 
-- **Evaluation and Inference:**
-  - Perplexity (PPL), loss, and ROUGE-L metrics.
-  - Inference-only mode for fast evaluation on checkpoints.
-  - Integration with Weights & Biases (wandb) for experiment tracking and visualization.
+- **MemoryAttentionManager**:  
+  Implements a multi-head self-attention mechanism over the memory bank. At each step, the model computes attention scores for all memory slots and removes the least-attended (least relevant) slot when the memory bank exceeds its configured size.
 
-- **Robust Logging and Error Handling:**
-  - Console and file logging.
-  - Clean progress bars with tqdm.
-  - Automatic handling of CUDA OOM and disk space errors.
+- **Configurable Memory Context**:  
+  The number of memory slots is controlled by the `--mem_recall_context` argument. This allows you to balance between memory usage and the ability to recall long-range dependencies.
+
+- **Integration in Training and Inference**:  
+  The memory manager is used both during training and inference, ensuring that the model always has access to the most relevant context, regardless of sequence length.
+
+#### Why This Matters
+
+- **Adaptive Retention**:  
+  Important information is kept longer, while less relevant or redundant context is pruned.
+- **Improved Long-Context Reasoning**:  
+  The model can handle tasks where dependencies span across many segments, such as document-level understanding, summarization, and QA.
+- **Resource Efficiency**:  
+  By keeping only the most relevant memories, GPU memory is used more effectively.
+
+#### Example: Memory Management in Code
+
+```python
+if self.cross_attn is not None:
+    device = memory_state.device
+    if memory_seq is None:
+        memory_seq = memory_state.detach().to(device)
+    else:
+        memory_seq = torch.cat([memory_seq, memory_state.detach().to(device)], dim=1)
+    if memory_seq.shape[1] > self.ltm_context:
+        memory_seq, removed_idx = self.memory_attn_manager(memory_seq)
+```
+
+- Here, `self.memory_attn_manager` uses attention to decide which memory slot to remove, rather than simply dropping the oldest.
+
+---
+
+## Minimal Usage
+
+### Training Example
+
+```bash
+python hmt_src/main.py \
+  --task_name wikitext \
+  --task_config wikitext-103-raw-v1 \
+  --batch_size 1 \
+  --segment_length 128 \
+  --mem_recall_context 20 \
+  --save_ckpt ./ckpt_wiki103
+```
+
+### Inference Example
+
+```bash
+python hmt_src/main.py \
+  --task_name wikitext \
+  --task_config wikitext-103-raw-v1 \
+  --batch_size 1 \
+  --segment_length 128 \
+  --mem_recall_context 20 \
+  --load_from_ckpt ./ckpt_wiki103 \
+  --inference_only
+```
 
 ---
 
-## Key Code Changes & Implementation Details
+## Project Structure
 
-### 1. Progress Bar and Logging
-- Replaced `logger.info` with `tqdm.tqdm.write` for per-batch logging in both training and test loops to keep the progress bar clean.
+```
+hmt_src/
+  main.py                # Main script
+  modeling_rmt/
+    language_modeling.py # MemoryAttentionManager and model logic
+```
 
-### 2. Wandb Logging for Test Metrics
-- Added logging of test loss and perplexity to wandb after each test batch, ensuring test metrics are visualized even in inference-only runs.
-
-### 3. Disk Space and Cache Directory Handling
-- Added `--cache_dir` argument and used it when loading models/tokenizers to prevent "No space left on device" errors.
-
-### 4. Safe Checkpoint Saving
-- Ensured checkpoint directory exists before saving model weights to avoid save errors.
-
-### 5. Flexible Dataset Handling
-- Added options for streaming, shuffling, and partial dataset loading for efficient experimentation.
-
-### 6. Memory Management Improvements
-- Integrated `MemoryAttentionManager` for attention-based memory pruning, improving long-context reasoning.
-
-### 7. Additional Features
-- Histogram plotting for memory recall context (`--plot_hist`).
-- Prompt-based text generation (`--generate`).
-- Optional autoencoder injection for embedding compression (`--inject_autoencoder`).
-
----
+**This project demonstrates how attention-based memory management can significantly improve long-context reasoning in transformer models.**
 
 ## Usage
 
