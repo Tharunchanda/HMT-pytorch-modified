@@ -1,4 +1,6 @@
 # HMT-pytorch: Hierarchical Memory Transformer with Advanced Memory Management
+## 📌 Presentation
+📽️ **[View Presentation Slides](https://docs.google.com/presentation/d/1vfPOLPX1eXkYDZe4a1IPB43XcY_DdLVO/edit?usp=sharing&ouid=104384435607685837097&rtpof=true&sd=true)**
 
 ## Overview
 
